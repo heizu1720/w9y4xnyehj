@@ -309,6 +309,7 @@ let hugT = -9, bannerT = -9, bannerMsg = "";
 let tumbleT = -9, foundT = -9, foundLine = "";
 let newBest = false, started = false;
 let tiltG = 0, tiltOn = false, touchX = -1, keyDir = 0;
+let motOn = false, axG = 0, azSign = -1, permPending = false, permState = "";
 
 /* ----- keepsake ----- */
 const SAVE_KEY = "bp_dash";
@@ -353,7 +354,6 @@ function startRun(){
   newBest = false; started = true;
   banner("run to your piggy! 💗");
   sStart();
-  askTilt();
 }
 
 /* --------------------------- one step of run -------------------------- */
@@ -368,7 +368,10 @@ function updateRun(dt){
   if (state === "run"){
     let target = 0;
     if (touchX >= 0)        target = clamp((touchX - W / 2) / (W * 0.28), -1, 1) * 430;
-    else if (tiltOn && Math.abs(tiltG) > 2.5) target = clamp(tiltG / 24, -1, 1) * 430;
+    else if (tiltOn){
+      const a = motOn ? axG : tiltG;              // prefer accelerometer signal
+      if (Math.abs(a) > 2) target = clamp(a / 22, -1, 1) * 430;
+    }
     else if (keyDir)        target = keyDir * 400;
     sv += (target - sv) * Math.min(1, dt * 9);
     px = clamp(px + sv * dt, -FW + 14, FW - 14);
@@ -781,23 +784,41 @@ function renderFound(){
 }
 
 /* ------------------------------ input ---------------------------------- */
+function attachSensors(){
+  /* accelerometer gravity — steady at any holding angle, like the old cube games */
+  window.addEventListener("devicemotion", e => {
+    const g = e.accelerationIncludingGravity;
+    if (!g || g.x === null || g.x === undefined) return;
+    if (Math.abs(g.z) > 2.5) azSign = g.z < 0 ? -1 : 1;   // -1 = iOS convention
+    const gx = g.x * (azSign === -1 ? 1 : -1);            // +ve = right edge down
+    const deg = Math.asin(clamp(gx / 9.81, -1, 1)) * 57.29578;
+    axG += (deg - axG) * 0.35;
+    motOn = true; tiltOn = true;
+  });
+  window.addEventListener("deviceorientation", e => {      // backup signal
+    if (e.gamma === null) return;
+    tiltG = e.gamma;
+    if (!motOn) tiltOn = true;
+  });
+}
 function askTilt(){
-  if (tiltOn) return;
-  const attach = () => {
-    window.addEventListener("deviceorientation", e => {
-      if (e.gamma === null) return;
-      tiltOn = true;
-      const o = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
-      tiltG = o === 90 ? -(e.beta || 0) : o === -90 || o === 270 ? (e.beta || 0) : e.gamma;
-    });
-  };
+  if (tiltOn || permPending || permState === "granted" || permState === "denied") return;
+  const M = typeof DeviceMotionEvent !== "undefined" &&
+            typeof DeviceMotionEvent.requestPermission === "function" ? DeviceMotionEvent
+          : typeof DeviceOrientationEvent !== "undefined" &&
+            typeof DeviceOrientationEvent.requestPermission === "function" ? DeviceOrientationEvent
+          : null;
+  if (!M){ attachSensors(); return; }
+  permPending = true;
   try {
-    if (typeof DeviceOrientationEvent !== "undefined" &&
-        typeof DeviceOrientationEvent.requestPermission === "function")
-      DeviceOrientationEvent.requestPermission()
-        .then(r => { if (r === "granted") attach(); }).catch(() => {});
-    else attach();
-  } catch(e){}
+    M.requestPermission().then(r => {
+      permPending = false; permState = r;
+      if (r === "granted"){
+        attachSensors();
+        if (state === "run") banner("tilt steering is on! 🐰");
+      } else if (state === "run") banner("no tilt — drag your finger to steer 💗");
+    }).catch(() => { permPending = false; });   // gesture not accepted — retry on next tap
+  } catch(e){ permPending = false; }
 }
 function tap(x, y){
   sndInit();
@@ -807,12 +828,13 @@ function tap(x, y){
 cvs.addEventListener("pointerdown", e => {
   e.preventDefault();
   tap(e.clientX, e.clientY);
+  askTilt();
   if (state === "run") touchX = e.clientX;
 }, { passive: false });
 cvs.addEventListener("pointermove", e => {
   if (touchX >= 0) touchX = e.clientX;
 }, { passive: true });
-const endTouch = () => { touchX = -1; };
+const endTouch = () => { touchX = -1; askTilt(); };   // pointerup = the gesture iOS reliably honors
 cvs.addEventListener("pointerup", endTouch);
 cvs.addEventListener("pointercancel", endTouch);
 window.addEventListener("keydown", e => {
