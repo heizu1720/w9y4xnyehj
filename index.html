@@ -102,6 +102,8 @@ const sTrip  = () => { blip(330, 0.12, "triangle", 0.08); blip(196, 0.2, "triang
                        blip(147, 0.3, "triangle", 0.05, 0.22); };
 const sStart = () => { blip(440, 0.1, "triangle", 0.08); blip(587, 0.12, "triangle", 0.07, 0.08);
                        blip(880, 0.16, "triangle", 0.06, 0.16); };
+const sHop   = () => { blip(523, 0.07, "triangle", 0.07); blip(784, 0.11, "triangle", 0.05, 0.05); };
+const sSqueak= () => { blip(880, 0.07, "sine", 0.06); blip(1175, 0.1, "sine", 0.06, 0.06); };
 
 /* ============================ characters =============================== */
 /* side views (title + found screens) — same friends from the first game  */
@@ -193,14 +195,14 @@ function drawPiglet(x, y, tt, o){
 /* back view — the bunny we run behind. origin = ground under feet */
 function drawBunnyBack(x, y, tt, o){
   o = o || {};
-  const hopY = o.still ? 0 : -Math.abs(Math.sin(tt * 9)) * 7;
+  const hopY = (o.still ? 0 : -Math.abs(Math.sin(tt * 9)) * 7) - (o.air || 0);
   const earWob = o.still ? Math.sin(tt * 2) * 0.04 : Math.sin(tt * 9) * 0.09;
   const lean = o.lean || 0;
   ctx.save();
   ctx.translate(x, y);
   if (!o.spin){
     ctx.fillStyle = "rgba(60,60,90,0.16)";
-    ctx.beginPath(); ctx.ellipse(0, 0, 24 + hopY * 0.6, 5, 0, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(0, 0, Math.max(9, 24 + hopY * 0.22), 5, 0, 0, 7); ctx.fill();
   }
   ctx.translate(0, hopY);
   ctx.rotate(lean * 0.9 + (o.spin || 0));
@@ -274,6 +276,101 @@ function drawPigletFront(x, y, s, tt, o){
   ctx.beginPath(); ctx.arc(11, -41, 3.4, 0, 7); ctx.fill();
   ctx.restore();
 }
+/* back view piggy — when she's the one doing the running */
+function drawPigletBack(x, y, tt, o){
+  o = o || {};
+  const hopY = (o.still ? 0 : -Math.abs(Math.sin(tt * 9)) * 7) - (o.air || 0);
+  const earWob = o.still ? Math.sin(tt * 2) * 0.04 : Math.sin(tt * 9) * 0.09;
+  const lean = o.lean || 0;
+  ctx.save();
+  ctx.translate(x, y);
+  if (!o.spin){
+    ctx.fillStyle = "rgba(60,60,90,0.16)";
+    ctx.beginPath(); ctx.ellipse(0, 0, Math.max(9, 24 + hopY * 0.22), 5, 0, 0, 7); ctx.fill();
+  }
+  ctx.translate(0, hopY);
+  ctx.rotate(lean * 0.9 + (o.spin || 0));
+  // trotters peeking out
+  ctx.fillStyle = "#f59ab8";
+  ctx.beginPath(); ctx.ellipse(-11, -4, 7, 5, 0.2, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(11, -4, 7, 5, -0.2, 0, 7); ctx.fill();
+  // pointy ears, leaning into the turn
+  for (const e of [{dx: -9, a: -0.22}, {dx: 9, a: 0.22}]){
+    ctx.save();
+    ctx.translate(e.dx, -52);
+    ctx.rotate(e.a + earWob + lean * 1.6);
+    ctx.fillStyle = "#f08bab";
+    ctx.beginPath(); ctx.moveTo(-5.5, 3); ctx.quadraticCurveTo(-3, -12, 0, -14);
+    ctx.quadraticCurveTo(3, -12, 5.5, 3); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+  // round back + head
+  ctx.fillStyle = "#ffb3c8";
+  ctx.beginPath(); ctx.ellipse(0, -24, 23, 21, 0, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(0, -48, 15.5, 0, 7); ctx.fill();
+  // curly tail
+  ctx.strokeStyle = "#f08bab"; ctx.lineWidth = 3; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.arc(-2, -13, 4.5, Math.PI * 0.5, Math.PI * 1.9); ctx.stroke();
+  ctx.beginPath(); ctx.arc(2, -16, 2.5, Math.PI * 1.2, Math.PI * 2.4); ctx.stroke();
+  // cheek hints
+  ctx.fillStyle = "rgba(240,139,171,0.45)";
+  ctx.beginPath(); ctx.arc(-11, -45, 3, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(11, -45, 3, 0, 7); ctx.fill();
+  ctx.restore();
+}
+/* bunny standing ahead, facing us, waving */
+function drawBunnyFront(x, y, s, tt, o){
+  o = o || {};
+  const bnc = Math.sin(tt * 3.4) * 2;
+  ctx.save();
+  ctx.translate(x, y); ctx.scale(s, s); ctx.translate(0, bnc * 0.5);
+  ctx.fillStyle = "rgba(60,60,90,0.16)";
+  ctx.beginPath(); ctx.ellipse(0, 0, 26, 5, 0, 0, 7); ctx.fill();
+  // tall ears with a tiny wobble
+  for (const e of [{dx: -9, a: -0.14}, {dx: 9, a: 0.14}]){
+    ctx.save();
+    ctx.translate(e.dx, -54);
+    ctx.rotate(e.a + Math.sin(tt * 2.2 + e.dx) * 0.05);
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath(); ctx.ellipse(0, -13, 5.8, 15.5, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = "#ffc2d4";
+    ctx.beginPath(); ctx.ellipse(0, -12, 2.9, 10.5, 0, 0, 7); ctx.fill();
+    ctx.restore();
+  }
+  // body + head
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath(); ctx.ellipse(0, -20, 23, 18, 0, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(0, -44, 16, 0, 7); ctx.fill();
+  // waving paw
+  ctx.save();
+  ctx.translate(20, -30); ctx.rotate(Math.sin(tt * 7) * 0.5 - 0.5);
+  ctx.fillStyle = "#f2e8ec";
+  ctx.beginPath(); ctx.ellipse(0, -8, 5, 9, 0.2, 0, 7); ctx.fill();
+  ctx.restore();
+  // happy arc eyes
+  ctx.strokeStyle = "#4a3c46"; ctx.lineWidth = 2.2; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.arc(-7, -47, 3, Math.PI, 2 * Math.PI); ctx.stroke();
+  ctx.beginPath(); ctx.arc(7, -47, 3, Math.PI, 2 * Math.PI); ctx.stroke();
+  // little nose + mouth + blush
+  ctx.fillStyle = "#ff9bb5";
+  ctx.beginPath(); ctx.arc(0, -41, 2.2, 0, 7); ctx.fill();
+  ctx.strokeStyle = "#d98aa0"; ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.arc(0, -37.5, 2.6, 0.15, Math.PI - 0.4); ctx.stroke();
+  ctx.fillStyle = "rgba(255,140,165,0.4)";
+  ctx.beginPath(); ctx.arc(-11, -41, 3.4, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(11, -41, 3.4, 0, 7); ctx.fill();
+  ctx.restore();
+}
+/* who's running, who's waiting — picked on the title screen */
+function drawRunnerBack(x, y, tt, o){
+  (save.char === "piggy" ? drawPigletBack : drawBunnyBack)(x, y, tt, o);
+}
+function drawPartnerFront(x, y, s, tt, o){
+  (save.char === "piggy" ? drawBunnyFront : drawPigletFront)(x, y, s, tt, o);
+}
+function partnerName(){ return save.char === "piggy" ? "bunny" : "piggy"; }
+function partnerHe(){ return save.char === "piggy" ? "he" : "she"; }
+function partnerEmoji(){ return save.char === "piggy" ? "🐰" : "🐷"; }
 
 /* ======================== the journey's colors ========================= */
 const ZONES = [
@@ -310,13 +407,20 @@ let tumbleT = -9, foundT = -9, foundLine = "";
 let newBest = false, started = false;
 let tiltG = 0, tiltOn = false, touchX = -1, keyDir = 0;
 let motOn = false, axG = 0, azSign = -1, permPending = false, permState = "";
+let hopT = -9, downX = -1, downT = -9;
+
+/* ----- top runs (leaderboard) — set LB_URL to turn it on ----- */
+let LB_URL = "";
+let lbRows = null, lbBusy = false, lbErr = false, lbSent = false;
 
 /* ----- keepsake ----- */
 const SAVE_KEY = "bp_dash";
-let save = { best: 0, hearts: 0, hugs: 0 };
+let save = { best: 0, hearts: 0, hugs: 0, char: "bunny", name: "" };
 function loadSave(){
   try { const s = JSON.parse(localStorage.getItem(SAVE_KEY));
     if (s && typeof s.best === "number") save = s; } catch(e){}
+  if (save.char !== "piggy") save.char = "bunny";
+  if (typeof save.name !== "string") save.name = "";
 }
 function storeSave(){
   try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch(e){}
@@ -351,9 +455,19 @@ function startRun(){
   state = "run"; px = 0; sv = 0; v = 340; dist = 0;
   runHearts = 0; runHugs = 0; obs = []; hearts = []; parts = [];
   travel = 0; heartTravel = 0; piggy = null; nextPiggy = 220;
-  newBest = false; started = true;
-  banner("run to your piggy! 💗");
+  newBest = false; started = true; hopT = -9; lbSent = false;
+  banner("run to your " + partnerName() + "! 💗");
   sStart();
+}
+/* a quick tap = a hop over whatever's in the way */
+const HOPDUR = 0.62;
+function hopAir(){                       // 0 on the ground .. 1 at the top
+  const k = (t - hopT) / HOPDUR;
+  return k > 0 && k < 1 ? Math.sin(k * Math.PI) : 0;
+}
+function hop(){
+  if (state !== "run" || t - hopT < HOPDUR + 0.08) return;
+  hopT = t; sHop();
 }
 
 /* --------------------------- one step of run -------------------------- */
@@ -364,18 +478,18 @@ function updateRun(dt){
   dist += vz * dt / 22;
   lineOff = (lineOff + vz * dt) % 130;
 
-  // steering (tilt > touch > keys), only while actually running
+  // steering (touch > tilt > keys), only while actually running
   if (state === "run"){
     let target = 0;
-    if (touchX >= 0)        target = clamp((touchX - W / 2) / (W * 0.28), -1, 1) * 430;
+    if (touchX >= 0)        target = clamp((touchX - W / 2) / (W * 0.24), -1, 1) * 540;
     else if (tiltOn){
       const a = motOn ? axG : tiltG;              // prefer accelerometer signal
-      if (Math.abs(a) > 2) target = clamp(a / 22, -1, 1) * 430;
+      if (Math.abs(a) > 1.2) target = clamp(a / 14, -1, 1) * 540;
     }
-    else if (keyDir)        target = keyDir * 400;
-    sv += (target - sv) * Math.min(1, dt * 9);
+    else if (keyDir)        target = keyDir * 480;
+    sv += (target - sv) * Math.min(1, dt * 13);
     px = clamp(px + sv * dt, -FW + 14, FW - 14);
-    lean += (clamp(sv / 430, -1, 1) * 0.16 - lean) * Math.min(1, dt * 8);
+    lean += (clamp(sv / 540, -1, 1) * 0.16 - lean) * Math.min(1, dt * 10);
   } else {
     sv *= 0.95;
   }
@@ -425,20 +539,22 @@ function updateRun(dt){
         parts.push({ x: p.x + rand(-30, 30), y: p.y - rand(10, 80), vx: rand(-50, 50),
           vy: rand(-120, -30), g: 40, life: rand(0.8, 1.6), maxLife: 1.6, type: "heart",
           size: rand(0.8, 1.8), color: pick(["#ff5e8a", "#ff8fb3", "#ffd166"]) });
-      banner(pick(["piggy! 💗 ...and she hops ahead, giggling",
+      banner(pick([partnerName() + "! 💗 ..." + partnerHe() + " hops ahead, giggling",
                    "a quick nuzzle 💗 — catch me again!",
-                   "piggy kisses 💗 she's off again!"]));
+                   partnerName() + " kisses 💗 " + partnerHe() + "'s off again!"]));
     } else if (state === "run"){
-      sOink();
-      banner(pick(["piggy giggles — over here! 💗", "so close! piggy waves 🐷"]));
+      (save.char === "piggy" ? sSqueak : sOink)();
+      banner(pick([partnerName() + " giggles — over here! 💗",
+                   "so close! " + partnerName() + " waves " + partnerEmoji()]));
     }
     piggy = null; nextPiggy = dist + 330;
   }
 
-  // obstacles: collide or pass
+  // obstacles: collide or pass (mid-hop sails right over)
+  const air = hopAir();
   for (let i = obs.length - 1; i >= 0; i--){
     const o = obs[i];
-    if (state === "run" && o.z < NEAR + 34 && o.z > NEAR - 6 &&
+    if (state === "run" && air < 0.45 && o.z < NEAR + 34 && o.z > NEAR - 6 &&
         Math.abs(o.x - px) < HITW[o.kind]){
       state = "tumble"; tumbleT = t; sTrip();
       for (let k = 0; k < 16; k++)
@@ -454,8 +570,9 @@ function updateRun(dt){
   // tumble ends in being found
   if (state === "tumble" && t - tumbleT > 1.5){
     state = "found"; foundT = t;
-    foundLine = pick(["found you anyway 💗", "there you are, silly bunny 💗",
-                      "my bunny! I was looking for YOU 💗"]);
+    const me = save.char === "piggy" ? "piggy" : "bunny";
+    foundLine = pick(["found you anyway 💗", "there you are, silly " + me + " 💗",
+                      "my " + me + "! I was looking for YOU 💗"]);
     newBest = dist > save.best && save.best > 0;
     if (dist > save.best) save.best = dist;
     save.hearts += runHearts; save.hugs += runHugs;
@@ -690,18 +807,18 @@ function renderRun(){
     else if (e.kind === "heart")
       drawHeart(p.x, p.y - (26 + Math.sin(t * 4 + e.it.ph) * 7) * p.s * 1.85,
                 clamp(p.s * 5.2, 0.25, 3.2), "#ff5e8a", fade * clamp(p.s * 3, 0.25, 1));
-    else drawPigletFront(p.x, p.y, p.s * 1.95, t);
+    else drawPartnerFront(p.x, p.y, p.s * 1.95, t);
     ctx.globalAlpha = 1;
   }
-  // our bunny
+  // our runner
   if (state === "tumble"){
     const k = clamp((t - tumbleT) / 1.1, 0, 1);
-    drawBunnyBack(W / 2, BOTY - Math.sin(k * Math.PI) * 46, t,
+    drawRunnerBack(W / 2, BOTY - Math.sin(k * Math.PI) * 46, t,
       { spin: k * 6.6, still: true });
     if (k > 0.8)
       txt("oof! 🌸", W / 2, BOTY - 110, 17, "#ffffff", "center", 700, (k - 0.8) * 5);
   } else {
-    drawBunnyBack(W / 2, BOTY, t, { lean: lean });
+    drawRunnerBack(W / 2, BOTY, t, { lean: lean, air: hopAir() * 62 });
   }
   drawParts();
   // hug flash
@@ -727,10 +844,10 @@ function renderRun(){
 function renderTitle(){
   dist = 0; lineOff = (lineOff + 90 * 0.016) % 130;
   drawWorld();
-  // piggy waits far down the road
+  // your sweetheart waits far down the road
   const pp = proj(0, 900);
-  drawPigletFront(pp.x, pp.y, pp.s * 1.95, t);
-  drawBunnyBack(W / 2, BOTY, t, { still: false });
+  drawPartnerFront(pp.x, pp.y, pp.s * 1.95, t);
+  drawRunnerBack(W / 2, BOTY, t, { still: false });
   if (Math.random() < 0.04)
     parts.push({ x: W / 2 + rand(-60, 60), y: BOTY - 120, vx: 0, vy: -30, g: 0,
       life: 1.6, maxLife: 1.6, type: "heart", size: rand(0.5, 0.9), color: "#ff8fb3" });
@@ -738,49 +855,144 @@ function renderTitle(){
   const ty = H * 0.17;
   txt("Bunny Dash", W / 2 + 2, ty + 2, Math.min(40, W * 0.1), "rgba(120,60,90,0.25)");
   txt("Bunny Dash", W / 2, ty, Math.min(40, W * 0.1), "#ffffff");
-  txt("run to your piggy 💗", W / 2, ty + 44, 18, "#fff0f5");
+  txt("run to your " + partnerName() + " 💗", W / 2, ty + 44, 18, "#fff0f5");
   txt("another tiny game for Gina", W / 2, ty + 70, 13, "#ffe4ee", "center", 400, 0.85);
   ctx.globalAlpha = 0.92; ctx.fillStyle = "#ffffff";
   const bw = Math.min(W * 0.6, 230);
   rr(W / 2 - bw / 2, H * 0.62, bw, 50, 25); ctx.fill(); ctx.globalAlpha = 1;
   txt("tap to run", W / 2, H * 0.62 + 25, 19, "#b3486e", "center", 700,
       0.75 + 0.25 * Math.sin(t * 3));
-  txt("tilt your phone to steer 🐰", W / 2, H * 0.62 + 72, 13, "#ffffff", "center", 400, 0.8);
+  txt("tilt to steer · tap to hop 🐰", W / 2, H * 0.62 + 72, 13, "#ffffff", "center", 400, 0.8);
+  // who runs today? — little character picker
+  txt("who runs today?", W / 2, BOTY - 108, 13, "#ffffff", "center", 400, 0.85);
+  for (const c of [{ id: "bunny", x: W / 2 - 90 }, { id: "piggy", x: W / 2 + 90 }]){
+    const sel = save.char === c.id;
+    ctx.globalAlpha = sel ? 0.95 : 0.5; ctx.fillStyle = "#ffffff";
+    ctx.beginPath(); ctx.arc(c.x, BOTY - 34, 31, 0, 7); ctx.fill();
+    ctx.globalAlpha = 1;
+    if (sel){
+      ctx.strokeStyle = "#ff8fb3"; ctx.lineWidth = 3.5;
+      ctx.beginPath(); ctx.arc(c.x, BOTY - 34, 34, 0, 7); ctx.stroke();
+    }
+    (c.id === "bunny" ? drawBunnyFront : drawPigletFront)(c.x, BOTY - 6, 0.5, sel ? t : 0.8);
+  }
+  // top runs (only once the meadow book is open)
+  if (LB_URL){
+    ctx.globalAlpha = 0.85; ctx.fillStyle = "#ffffff";
+    rr(W - 118, 18, 100, 36, 18); ctx.fill(); ctx.globalAlpha = 1;
+    txt("top runs 🏅", W - 68, 36, 13, "#b3486e", "center", 700, 0.95);
+  }
   if (save.best > 0)
     txt("longest run so far · " + Math.floor(save.best) + "m", W / 2, H * 0.93, 13,
         "#ffffff", "center", 400, 0.7);
 }
 
 /* --------------------------- found by piggy ---------------------------- */
+function lbFoundBtn(){               // "add to top runs" pill on the found card
+  if (!LB_URL || lbSent) return null;
+  const py0 = H * 0.24;
+  return { x: W / 2 - 95, y: py0 + 292 - 76, w: 190, h: 36 };
+}
 function renderFound(){
   drawWorld();
   drawParts();
   const k = clamp((t - foundT) / 0.5, 0, 1);
+  const btn = lbFoundBtn();
   ctx.globalAlpha = 0.93 * k; ctx.fillStyle = "#fffdf8";
-  const pw = Math.min(W * 0.86, 350), ph2 = 250, py0 = H * 0.24;
+  const pw = Math.min(W * 0.86, 350), ph2 = btn ? 292 : 250, py0 = H * 0.24;
   rr(W / 2 - pw / 2, py0, pw, ph2, 26); ctx.fill(); ctx.globalAlpha = 1;
   if (k > 0.6){
     const a = (k - 0.6) / 0.4;
     txt("you ran " + Math.floor(dist) + "m 🐾", W / 2, py0 + 52, 24, "#b3486e", "center", 700, a);
     txt("and caught " + runHearts + " ♥" + (runHugs ? " · " + runHugs + " nuzzle" +
-        (runHugs > 1 ? "s" : "") + " 🐷" : ""), W / 2, py0 + 92, 15, "#c4708c", "center", 400, a);
+        (runHugs > 1 ? "s" : "") + " " + partnerEmoji() : ""),
+        W / 2, py0 + 92, 15, "#c4708c", "center", 400, a);
     if (newBest)
       txt("✨ your longest run yet ✨", W / 2, py0 + 124, 15, "#d4a017", "center", 700,
           a * (0.75 + 0.25 * Math.sin(t * 3)));
     txt('"' + foundLine + '"', W / 2, py0 + (newBest ? 158 : 140), 16, "#b3486e", "center", 700, a);
-    txt("tap to run again", W / 2, py0 + ph2 - 34, 15, "#c4708c", "center", 700,
+    if (btn){
+      ctx.globalAlpha = a * 0.95; ctx.fillStyle = "#ffd9e6";
+      rr(btn.x, btn.y, btn.w, btn.h, 18); ctx.fill(); ctx.globalAlpha = 1;
+      txt(lbBusy ? "sending..." : "add to top runs 🏅", W / 2, btn.y + 18, 14,
+          "#b3486e", "center", 700, a);
+    }
+    txt("tap to run again", W / 2, py0 + ph2 - 28, 15, "#c4708c", "center", 700,
         a * (0.7 + 0.3 * Math.sin(t * 3)));
   }
-  // piggy trots in to nuzzle her bunny
+  // your sweetheart trots in for a nuzzle
   const walk = clamp((t - foundT) / 1.4, 0, 1);
   const pgx = lerp(W + 60, W / 2 + 46, 1 - (1 - walk) * (1 - walk));
-  drawBunny(W / 2 - 46, BOTY + 30, t, { face: 1, happy: walk >= 1 });
-  drawPiglet(pgx, BOTY + 30, t, { face: -1, happy: true, lean: walk < 1 ? Math.sin(t * 9) * 0.06 : 0 });
+  const wob = walk < 1 ? Math.sin(t * 9) * 0.06 : 0;
+  if (save.char === "piggy"){
+    drawPiglet(W / 2 - 46, BOTY + 30, t, { face: 1, happy: walk >= 1 });
+    drawBunny(pgx, BOTY + 30, t, { face: -1, happy: true, lean: wob });
+  } else {
+    drawBunny(W / 2 - 46, BOTY + 30, t, { face: 1, happy: walk >= 1 });
+    drawPiglet(pgx, BOTY + 30, t, { face: -1, happy: true, lean: wob });
+  }
   if (walk >= 1 && Math.random() < 0.08)
     parts.push({ x: W / 2 + rand(-40, 40), y: BOTY - 60, vx: rand(-10, 10), vy: -36, g: 0,
       life: 1.4, maxLife: 1.4, type: "heart", size: rand(0.6, 1.2),
       color: pick(["#ff5e8a", "#ff8fb3"]) });
   updateParts(0.016);
+}
+
+/* ----------------------- top runs (the meadow book) -------------------- */
+function fetchBoard(){
+  if (!LB_URL) return;
+  lbBusy = true; lbErr = false;
+  fetch(LB_URL).then(r => r.json())
+    .then(j => { lbRows = j.slice(0, 10); lbBusy = false; })
+    .catch(() => { lbBusy = false; lbErr = true; });
+}
+function submitRun(){
+  if (!LB_URL || lbSent || lbBusy) return;
+  let nm = prompt("your name for the top runs? 🏅", save.name || "");
+  if (nm === null) return;
+  nm = nm.trim().slice(0, 14);
+  if (!nm) return;
+  save.name = nm; storeSave();
+  lbSent = true; lbBusy = true; lbErr = false;
+  fetch(LB_URL, { method: "POST", headers: { "Content-Type": "text/plain" },
+    body: JSON.stringify({ name: nm, m: Math.floor(dist) }) })
+    .then(r => r.json())
+    .then(j => { lbRows = j.slice(0, 10); lbBusy = false; state = "board"; })
+    .catch(() => { lbBusy = false; lbErr = true; state = "board"; });
+}
+function renderBoard(){
+  dist = 0; lineOff = (lineOff + 90 * 0.016) % 130;
+  drawWorld();
+  drawPartnerFront(proj(0, 900).x, proj(0, 900).y, proj(0, 900).s * 1.95, t);
+  const pw = Math.min(W * 0.86, 350), ph2 = Math.min(H * 0.62, 520), py0 = H * 0.13;
+  ctx.globalAlpha = 0.93; ctx.fillStyle = "#fffdf8";
+  rr(W / 2 - pw / 2, py0, pw, ph2, 26); ctx.fill(); ctx.globalAlpha = 1;
+  txt("top runs 🏅", W / 2, py0 + 44, 22, "#b3486e", "center", 700);
+  if (lbBusy)
+    txt("fetching the meadow book...", W / 2, py0 + ph2 / 2, 15, "#c4708c", "center", 400,
+        0.6 + 0.4 * Math.sin(t * 3));
+  else if (lbErr)
+    txt("couldn't reach the meadow 🌧", W / 2, py0 + ph2 / 2, 15, "#c4708c");
+  else if (lbRows && lbRows.length === 0)
+    txt("no runs yet — be the first! 🐾", W / 2, py0 + ph2 / 2, 15, "#c4708c");
+  else if (lbRows){
+    const rh = Math.min(38, (ph2 - 130) / lbRows.length);
+    for (let i = 0; i < lbRows.length; i++){
+      const y = py0 + 84 + i * rh, r = lbRows[i];
+      const mine = save.name && r.name === save.name;
+      const cc = i === 0 ? "#d4a017" : i === 1 ? "#9a9fb5" : i === 2 ? "#c08a5a" : "#c4708c";
+      if (mine){
+        ctx.globalAlpha = 0.5; ctx.fillStyle = "#ffd9e6";
+        rr(W / 2 - pw / 2 + 16, y - rh / 2 + 2, pw - 32, rh - 4, 10);
+        ctx.fill(); ctx.globalAlpha = 1;
+      }
+      txt(String(i + 1), W / 2 - pw / 2 + 38, y, 15, cc, "center", 700);
+      txt(r.name, W / 2 - pw / 2 + 58, y, 15, "#b3486e", "left", mine ? 700 : 400);
+      txt(r.m + "m", W / 2 + pw / 2 - 34, y, 15, cc, "right", 700);
+    }
+  }
+  txt("tap to go back", W / 2, py0 + ph2 - 26, 14, "#c4708c", "center", 700,
+      0.7 + 0.3 * Math.sin(t * 3));
 }
 
 /* ------------------------------ input ---------------------------------- */
@@ -792,7 +1004,7 @@ function attachSensors(){
     if (Math.abs(g.z) > 2.5) azSign = g.z < 0 ? -1 : 1;   // -1 = iOS convention
     const gx = g.x * (azSign === -1 ? 1 : -1);            // +ve = right edge down
     const deg = Math.asin(clamp(gx / 9.81, -1, 1)) * 57.29578;
-    axG += (deg - axG) * 0.35;
+    axG += (deg - axG) * 0.5;
     motOn = true; tiltOn = true;
   });
   window.addEventListener("deviceorientation", e => {      // backup signal
@@ -815,32 +1027,59 @@ function askTilt(){
       permPending = false; permState = r;
       if (r === "granted"){
         attachSensors();
-        if (state === "run") banner("tilt steering is on! 🐰");
+        if (state === "run") banner("tilt to steer — tap to hop! 🐰");
       } else if (state === "run") banner("no tilt — drag your finger to steer 💗");
     }).catch(() => { permPending = false; });   // gesture not accepted — retry on next tap
   } catch(e){ permPending = false; }
 }
 function tap(x, y){
   sndInit();
-  if (state === "title"){ startRun(); return; }
-  if (state === "found" && t - foundT > 1){ startRun(); return; }
+  if (state === "board"){ state = "title"; return; }
+  if (state === "title"){
+    // character picker?
+    for (const c of [{ id: "bunny", cx: W / 2 - 90 }, { id: "piggy", cx: W / 2 + 90 }]){
+      const dx = x - c.cx, dy = y - (BOTY - 34);
+      if (dx * dx + dy * dy < 44 * 44){
+        if (save.char !== c.id){ save.char = c.id; storeSave(); blip(660, 0.09, "sine", 0.07); }
+        return;
+      }
+    }
+    // top runs?
+    if (LB_URL && x > W - 126 && y < 62){ state = "board"; fetchBoard(); return; }
+    startRun(); return;
+  }
+  if (state === "found" && t - foundT > 1){
+    const b = lbFoundBtn();
+    if (b && x > b.x && x < b.x + b.w && y > b.y && y < b.y + b.h){ submitRun(); return; }
+    startRun(); return;
+  }
 }
 cvs.addEventListener("pointerdown", e => {
   e.preventDefault();
+  const wasRun = state === "run";
   tap(e.clientX, e.clientY);
   askTilt();
-  if (state === "run") touchX = e.clientX;
+  if (wasRun){
+    downX = e.clientX; downT = t;
+    if (tiltOn) hop();              // tilt steers, so a tap is a hop
+    else touchX = e.clientX;        // otherwise drag to steer (quick tap = hop)
+  }
 }, { passive: false });
 cvs.addEventListener("pointermove", e => {
   if (touchX >= 0) touchX = e.clientX;
 }, { passive: true });
-const endTouch = () => { touchX = -1; askTilt(); };   // pointerup = the gesture iOS reliably honors
+const endTouch = e => {             // pointerup = the gesture iOS reliably honors
+  if (state === "run" && !tiltOn && downT > 0 && t - downT < 0.22 &&
+      Math.abs((e.clientX === undefined ? downX : e.clientX) - downX) < 18) hop();
+  touchX = -1; downT = -9; askTilt();
+};
 cvs.addEventListener("pointerup", endTouch);
 cvs.addEventListener("pointercancel", endTouch);
 window.addEventListener("keydown", e => {
   if (e.key === "ArrowLeft") keyDir = -1;
   else if (e.key === "ArrowRight") keyDir = 1;
-  else if (e.key === " " && state !== "run") tap(W / 2, H / 2);
+  else if ((e.key === " " || e.key === "ArrowUp") && state === "run") hop();
+  else if (e.key === " ") tap(W / 2, H / 2);
 });
 window.addEventListener("keyup", e => {
   if ((e.key === "ArrowLeft" && keyDir < 0) || (e.key === "ArrowRight" && keyDir > 0))
@@ -853,6 +1092,7 @@ function loop(ms){
   last = ms; t += dt;
   ctx.clearRect(0, 0, W, H);
   if (state === "title") renderTitle();
+  else if (state === "board") renderBoard();
   else if (state === "found"){ renderFound(); }
   else { updateRun(dt); renderRun(); }
   requestAnimationFrame(loop);
