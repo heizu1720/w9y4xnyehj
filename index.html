@@ -1,0 +1,841 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#8fd5ff">
+<meta property="og:title" content="🐰💨 run, bunny, run!">
+<meta property="og:description" content="Bunny Dash — an endless little run to find piggy, made with love by David">
+<title>Bunny Dash 🐰💨</title>
+<style>
+  html,body{margin:0;padding:0;height:100%;background:#8fd5ff;overflow:hidden;
+    position:fixed;inset:0;touch-action:none;
+    -webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+  canvas{display:block}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+"use strict";
+/* ============================== setup ================================== */
+const cvs = document.getElementById("c"), ctx = cvs.getContext("2d");
+let W = 0, H = 0, DPR = 1, HOR = 0, BOTY = 0;
+function resize(){
+  DPR = Math.min(window.devicePixelRatio || 1, 3);
+  W = window.innerWidth; H = window.innerHeight;
+  cvs.width = W * DPR; cvs.height = H * DPR;
+  cvs.style.width = W + "px"; cvs.style.height = H + "px";
+  ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  HOR = H * 0.34; BOTY = H * 0.86;
+}
+window.addEventListener("resize", resize); resize();
+
+/* ============================== helpers ================================ */
+const rand = (a, b) => a + Math.random() * (b - a);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const pick = arr => arr[(Math.random() * arr.length) | 0];
+const lerp = (a, b, k) => a + (b - a) * k;
+const FONT = '"Chalkboard SE","Comic Sans MS","Segoe Print",cursive';
+function txt(s, x, y, px, color, align, weight, alpha){
+  ctx.save();
+  ctx.globalAlpha = alpha === undefined ? 1 : alpha;
+  ctx.fillStyle = color;
+  ctx.font = (weight || 700) + " " + px + "px " + FONT;
+  ctx.textAlign = align || "center"; ctx.textBaseline = "middle";
+  ctx.fillText(s, x, y);
+  ctx.restore();
+}
+function rr(x, y, w, h, r){           // rounded rect path (iOS-safe)
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+function drawHeart(x, y, s, color, alpha){
+  ctx.save();
+  ctx.globalAlpha = alpha === undefined ? 1 : alpha;
+  ctx.translate(x, y); ctx.scale(s, s);
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(0, 4);
+  ctx.bezierCurveTo(-8, -4, -4, -12, 0, -6);
+  ctx.bezierCurveTo(4, -12, 8, -4, 0, 4);
+  ctx.fill();
+  ctx.restore();
+}
+/* hex color mix for zone blending */
+function mix(c1, c2, k){
+  const a = parseInt(c1.slice(1), 16), b = parseInt(c2.slice(1), 16);
+  const r = Math.round(lerp(a >> 16, b >> 16, k));
+  const g = Math.round(lerp((a >> 8) & 255, (b >> 8) & 255, k));
+  const bl = Math.round(lerp(a & 255, b & 255, k));
+  return "#" + ((1 << 24) | (r << 16) | (g << 8) | bl).toString(16).slice(1);
+}
+
+/* ============================== audio ================================== */
+let AC = null;
+function sndInit(){
+  if (!AC){ try { AC = new (window.AudioContext || window.webkitAudioContext)(); } catch(e){} }
+  if (AC && AC.state === "suspended") AC.resume();
+}
+function blip(freq, dur, type, vol, delay){
+  if (!AC) return;
+  const tt = AC.currentTime + (delay || 0);
+  const o = AC.createOscillator(), g = AC.createGain();
+  o.type = type || "sine"; o.frequency.value = freq;
+  g.gain.setValueAtTime(vol || 0.1, tt);
+  g.gain.exponentialRampToValueAtTime(0.001, tt + dur);
+  o.connect(g); g.connect(AC.destination);
+  o.start(tt); o.stop(tt + dur + 0.02);
+}
+const sHeart = () => { blip(740, 0.09, "sine", 0.09); blip(988, 0.14, "sine", 0.09, 0.07); };
+const sHug   = () => [523, 659, 784, 1047].forEach((f, i) => blip(f, 0.18, "sine", 0.09, i * 0.11));
+const sOink  = () => { blip(180, 0.07, "sawtooth", 0.05); blip(240, 0.1, "sawtooth", 0.05, 0.07); };
+const sTrip  = () => { blip(330, 0.12, "triangle", 0.08); blip(196, 0.2, "triangle", 0.07, 0.1);
+                       blip(147, 0.3, "triangle", 0.05, 0.22); };
+const sStart = () => { blip(440, 0.1, "triangle", 0.08); blip(587, 0.12, "triangle", 0.07, 0.08);
+                       blip(880, 0.16, "triangle", 0.06, 0.16); };
+
+/* ============================ characters =============================== */
+/* side views (title + found screens) — same friends from the first game  */
+function drawBunny(x, y, tt, o){
+  o = o || {};
+  const face = o.face || 1;
+  const run = o.run ? Math.sin(tt * 13) : 0;
+  const flop = Math.sin(tt * 2.1) * 0.05 + (o.run ? Math.sin(tt * 13) * 0.06 : 0);
+  ctx.save();
+  ctx.translate(x, y); ctx.scale(face, 1);
+  if (o.lean) ctx.rotate(o.lean);
+  ctx.fillStyle = "rgba(60,60,90,0.13)";
+  ctx.beginPath(); ctx.ellipse(0, 1, 26, 5, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath(); ctx.arc(-25, -24, 7.5, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(-8, -6 + run * 2.5, 7, 5.5, 0, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(10, -6 - run * 2.5, 7, 5.5, 0, 0, 7); ctx.fill();
+  for (const e of [{dx: 8, a: -0.32}, {dx: 16, a: 0.1}]){
+    ctx.save();
+    ctx.translate(e.dx, -56);
+    ctx.rotate(e.a + flop);
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath(); ctx.ellipse(0, -12, 5.8, 15.5, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = "#ffc2d4";
+    ctx.beginPath(); ctx.ellipse(0, -11, 2.9, 10.5, 0, 0, 7); ctx.fill();
+    ctx.restore();
+  }
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath(); ctx.ellipse(0, -22, 24, 18.5, 0, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(14, -45, 16.5, 0, 7); ctx.fill();
+  if (o.happy){
+    ctx.strokeStyle = "#4a3c46"; ctx.lineWidth = 2.2; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.arc(20, -46, 3.2, Math.PI, 2 * Math.PI); ctx.stroke();
+  } else {
+    ctx.fillStyle = "#4a3c46";
+    ctx.beginPath(); ctx.arc(20, -47, 2.7, 0, 7); ctx.fill();
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath(); ctx.arc(21, -48, 1, 0, 7); ctx.fill();
+  }
+  ctx.fillStyle = "#ff9bb5";
+  ctx.beginPath(); ctx.arc(29.5, -43, 2.2, 0, 7); ctx.fill();
+  ctx.strokeStyle = "#d98aa0"; ctx.lineWidth = 1.4; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.arc(27.5, -39.5, 2.6, 0.15, Math.PI - 0.4); ctx.stroke();
+  ctx.fillStyle = "rgba(255,140,165,0.4)";
+  ctx.beginPath(); ctx.arc(21, -39, 3.6, 0, 7); ctx.fill();
+  ctx.restore();
+}
+function drawPiglet(x, y, tt, o){
+  o = o || {};
+  const face = o.face || 1;
+  const bnc = Math.sin(tt * 3.1) * 2;
+  ctx.save();
+  ctx.translate(x, y + bnc * 0.4); ctx.scale(face, 1);
+  if (o.lean) ctx.rotate(o.lean);
+  ctx.fillStyle = "rgba(60,60,90,0.13)";
+  ctx.beginPath(); ctx.ellipse(0, 1, 27, 5, 0, 0, 7); ctx.fill();
+  ctx.strokeStyle = "#f08bab"; ctx.lineWidth = 3; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.arc(-28, -26, 4.5, Math.PI * 0.4, Math.PI * 1.8); ctx.stroke();
+  ctx.beginPath(); ctx.arc(-30, -29, 2.5, Math.PI * 1.1, Math.PI * 2.3); ctx.stroke();
+  ctx.fillStyle = "#f59ab8";
+  ctx.beginPath(); ctx.ellipse(-9, -5.5, 6.5, 5.5, 0, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(9, -5.5, 6.5, 5.5, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = "#ffb3c8";
+  ctx.beginPath(); ctx.ellipse(0, -21, 26, 18.5, 0, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(15, -41, 15.5, 0, 7); ctx.fill();
+  ctx.fillStyle = "#f08bab";
+  ctx.beginPath(); ctx.moveTo(5, -52); ctx.quadraticCurveTo(3, -62, 12, -58);
+  ctx.quadraticCurveTo(11, -52, 8, -50); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(17, -54); ctx.quadraticCurveTo(18, -64, 26, -57);
+  ctx.quadraticCurveTo(23, -52, 19, -51); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = "#f08bab";
+  ctx.beginPath(); ctx.ellipse(28.5, -39, 6.8, 5.4, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = "#c2607f";
+  ctx.beginPath(); ctx.arc(26.7, -39.5, 1.2, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(30.5, -39.5, 1.2, 0, 7); ctx.fill();
+  if (o.happy){
+    ctx.strokeStyle = "#5a3142"; ctx.lineWidth = 2.2; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.arc(19, -45, 3.2, Math.PI, 2 * Math.PI); ctx.stroke();
+  } else {
+    ctx.fillStyle = "#5a3142";
+    ctx.beginPath(); ctx.arc(19, -46, 2.7, 0, 7); ctx.fill();
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath(); ctx.arc(20, -47, 1, 0, 7); ctx.fill();
+  }
+  ctx.fillStyle = "rgba(255,110,150,0.4)";
+  ctx.beginPath(); ctx.arc(19.5, -37.5, 3.8, 0, 7); ctx.fill();
+  ctx.restore();
+}
+/* back view — the bunny we run behind. origin = ground under feet */
+function drawBunnyBack(x, y, tt, o){
+  o = o || {};
+  const hopY = o.still ? 0 : -Math.abs(Math.sin(tt * 9)) * 7;
+  const earWob = o.still ? Math.sin(tt * 2) * 0.04 : Math.sin(tt * 9) * 0.09;
+  const lean = o.lean || 0;
+  ctx.save();
+  ctx.translate(x, y);
+  if (!o.spin){
+    ctx.fillStyle = "rgba(60,60,90,0.16)";
+    ctx.beginPath(); ctx.ellipse(0, 0, 24 + hopY * 0.6, 5, 0, 0, 7); ctx.fill();
+  }
+  ctx.translate(0, hopY);
+  ctx.rotate(lean * 0.9 + (o.spin || 0));
+  // feet peeking out
+  ctx.fillStyle = "#f2e8ec";
+  ctx.beginPath(); ctx.ellipse(-11, -4, 7, 5, 0.2, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(11, -4, 7, 5, -0.2, 0, 7); ctx.fill();
+  // ears (behind body, leaning into the turn)
+  for (const e of [{dx: -8, a: -0.16}, {dx: 8, a: 0.16}]){
+    ctx.save();
+    ctx.translate(e.dx, -54);
+    ctx.rotate(e.a + earWob + lean * 1.6);
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath(); ctx.ellipse(0, -19, 6.2, 19, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = "#ffc2d4";
+    ctx.beginPath(); ctx.ellipse(0, -18, 3, 13, 0, 0, 7); ctx.fill();
+    ctx.restore();
+  }
+  // round back + head
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath(); ctx.ellipse(0, -24, 23, 21, 0, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(0, -48, 15.5, 0, 7); ctx.fill();
+  // fluffy tail
+  ctx.fillStyle = "#fff6fa";
+  ctx.beginPath(); ctx.arc(0, -14, 8, 0, 7); ctx.fill();
+  ctx.fillStyle = "rgba(255,194,212,0.55)";
+  ctx.beginPath(); ctx.arc(0, -14, 4.5, 0, 7); ctx.fill();
+  // cheek fluff hints so she's not a ghost
+  ctx.fillStyle = "rgba(255,140,165,0.30)";
+  ctx.beginPath(); ctx.arc(-11, -45, 3, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(11, -45, 3, 0, 7); ctx.fill();
+  ctx.restore();
+}
+/* piggy standing ahead, facing us */
+function drawPigletFront(x, y, s, tt, o){
+  o = o || {};
+  const bnc = Math.sin(tt * 3.4) * 2;
+  ctx.save();
+  ctx.translate(x, y); ctx.scale(s, s); ctx.translate(0, bnc * 0.5);
+  ctx.fillStyle = "rgba(60,60,90,0.16)";
+  ctx.beginPath(); ctx.ellipse(0, 0, 26, 5, 0, 0, 7); ctx.fill();
+  // ears
+  ctx.fillStyle = "#f08bab";
+  ctx.beginPath(); ctx.moveTo(-14, -52); ctx.quadraticCurveTo(-20, -64, -8, -58);
+  ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(14, -52); ctx.quadraticCurveTo(20, -64, 8, -58);
+  ctx.closePath(); ctx.fill();
+  // body + head
+  ctx.fillStyle = "#ffb3c8";
+  ctx.beginPath(); ctx.ellipse(0, -20, 24, 18, 0, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(0, -44, 16, 0, 7); ctx.fill();
+  // waving trotter
+  ctx.save();
+  ctx.translate(20, -30); ctx.rotate(Math.sin(tt * 7) * 0.5 - 0.5);
+  ctx.fillStyle = "#f59ab8";
+  ctx.beginPath(); ctx.ellipse(0, -8, 5, 9, 0.2, 0, 7); ctx.fill();
+  ctx.restore();
+  // eyes (happy arcs)
+  ctx.strokeStyle = "#5a3142"; ctx.lineWidth = 2.2; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.arc(-7, -47, 3, Math.PI, 2 * Math.PI); ctx.stroke();
+  ctx.beginPath(); ctx.arc(7, -47, 3, Math.PI, 2 * Math.PI); ctx.stroke();
+  // snout
+  ctx.fillStyle = "#f08bab";
+  ctx.beginPath(); ctx.ellipse(0, -40, 7, 5.5, 0, 0, 7); ctx.fill();
+  ctx.fillStyle = "#c2607f";
+  ctx.beginPath(); ctx.arc(-2, -40, 1.2, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(2, -40, 1.2, 0, 7); ctx.fill();
+  // blush
+  ctx.fillStyle = "rgba(255,110,150,0.4)";
+  ctx.beginPath(); ctx.arc(-11, -41, 3.4, 0, 7); ctx.fill();
+  ctx.beginPath(); ctx.arc(11, -41, 3.4, 0, 7); ctx.fill();
+  ctx.restore();
+}
+
+/* ======================== the journey's colors ========================= */
+const ZONES = [
+  { sky: ["#8fd5ff", "#e8f7ff"], hill: "#a9dd90", ground: "#8fd573",
+    edge: "#ffffff", kinds: ["tree", "bush", "mushroom"], amb: "petal", night: false },
+  { sky: ["#a8dcff", "#ffeef6"], hill: "#b8e2a0", ground: "#93d17e",
+    edge: "#ffc2d4", kinds: ["sakura", "sakura", "bush"], amb: "petal", night: false },
+  { sky: ["#ffb86b", "#ffe7c2"], hill: "#d99a55", ground: "#b9853f",
+    edge: "#ffd9a0", kinds: ["autumn", "autumn", "bushA"], amb: "leaf", night: false },
+  { sky: ["#544a8c", "#e8a7c0"], hill: "#5e5f93", ground: "#5e8f63",
+    edge: "#c9a6ff", kinds: ["lavender", "lavender", "treeD"], amb: "firefly", night: false },
+  { sky: ["#2b2d5e", "#6a6fb5"], hill: "#4a4f86", ground: "#dfe9f8",
+    edge: "#9fb6e8", kinds: ["pine", "pine", "snowman"], amb: "snow", night: true },
+];
+const ZLEN = 450, ZBLEND = 80;       // metres per zone, blend window
+function zoneMix(dist){
+  const zi = Math.floor(dist / ZLEN) % ZONES.length;
+  const zj = (zi + 1) % ZONES.length;
+  const into = dist % ZLEN;
+  const k = into > ZLEN - ZBLEND ? (into - (ZLEN - ZBLEND)) / ZBLEND : 0;
+  return { a: ZONES[zi], b: ZONES[zj], k: k, zi: zi };
+}
+/* =========================== world & state ============================ */
+const NEAR = 60, FAR = 2400, FW = 320;   // near plane, spawn depth, half field width
+let state = "title";                     // title | run | tumble | found
+let t = 0, last = 0;
+let px = 0, sv = 0, lean = 0;            // bunny lateral pos / vel / lean
+let v = 0, dist = 0, runHearts = 0, runHugs = 0;
+let obs = [], hearts = [], parts = [];
+let travel = 0, heartTravel = 0, lineOff = 0;
+let piggy = null, nextPiggy = 220;
+let hugT = -9, bannerT = -9, bannerMsg = "";
+let tumbleT = -9, foundT = -9, foundLine = "";
+let newBest = false, started = false;
+let tiltG = 0, tiltOn = false, touchX = -1, keyDir = 0;
+
+/* ----- keepsake ----- */
+const SAVE_KEY = "bp_dash";
+let save = { best: 0, hearts: 0, hugs: 0 };
+function loadSave(){
+  try { const s = JSON.parse(localStorage.getItem(SAVE_KEY));
+    if (s && typeof s.best === "number") save = s; } catch(e){}
+}
+function storeSave(){
+  try { localStorage.setItem(SAVE_KEY, JSON.stringify(save)); } catch(e){}
+}
+loadSave();
+
+function banner(msg){ bannerMsg = msg; bannerT = t; }
+
+/* ----------------------------- projection ----------------------------- */
+/* z: NEAR (at our feet) .. FAR (horizon). returns screen x,y and scale */
+function proj(ox, z){
+  const s = Math.pow(NEAR / z, 0.62);   // softened perspective — fills the field
+  return { x: W / 2 + (ox - px) * s, y: HOR + (BOTY - HOR) * s, s: s };
+}
+
+/* ------------------------------ spawning ------------------------------ */
+const HITW = { tree: 30, sakura: 30, autumn: 30, treeD: 30, pine: 26,
+               snowman: 24, bush: 26, bushA: 26, mushroom: 20, lavender: 24 };
+function spawnObs(zm){
+  let x = rand(-FW, FW);
+  if (piggy && Math.abs(x - piggy.x) < 95)        // keep her corridor kind
+    x += x > piggy.x ? 95 : -95;
+  obs.push({ x: clamp(x, -FW, FW), z: FAR, kind: pick(zm.kinds), ph: rand(0, 6.28) });
+}
+function spawnHearts(){
+  const n = 2 + (Math.random() * 3 | 0);          // a little string of 2-4
+  const x0 = rand(-FW * 0.8, FW * 0.8), drift = rand(-26, 26);
+  for (let i = 0; i < n; i++)
+    hearts.push({ x: clamp(x0 + drift * i, -FW, FW), z: FAR + i * 95, ph: rand(0, 6.28) });
+}
+function startRun(){
+  state = "run"; px = 0; sv = 0; v = 340; dist = 0;
+  runHearts = 0; runHugs = 0; obs = []; hearts = []; parts = [];
+  travel = 0; heartTravel = 0; piggy = null; nextPiggy = 220;
+  newBest = false; started = true;
+  banner("run to your piggy! 💗");
+  sStart();
+  askTilt();
+}
+
+/* --------------------------- one step of run -------------------------- */
+function updateRun(dt){
+  const slow = state === "tumble" ? clamp(1 - (t - tumbleT) / 1.1, 0, 1) : 1;
+  if (state === "run") v = Math.min(940, v + 6.5 * dt);
+  const vz = v * slow;
+  dist += vz * dt / 22;
+  lineOff = (lineOff + vz * dt) % 130;
+
+  // steering (tilt > touch > keys), only while actually running
+  if (state === "run"){
+    let target = 0;
+    if (touchX >= 0)        target = clamp((touchX - W / 2) / (W * 0.28), -1, 1) * 430;
+    else if (tiltOn && Math.abs(tiltG) > 2.5) target = clamp(tiltG / 24, -1, 1) * 430;
+    else if (keyDir)        target = keyDir * 400;
+    sv += (target - sv) * Math.min(1, dt * 9);
+    px = clamp(px + sv * dt, -FW + 14, FW - 14);
+    lean += (clamp(sv / 430, -1, 1) * 0.16 - lean) * Math.min(1, dt * 8);
+  } else {
+    sv *= 0.95;
+  }
+
+  const zm = zoneMix(dist);
+
+  // spawn obstacles by distance travelled, gently denser over time
+  travel += vz * dt;
+  const gap = clamp(165 - dist * 0.05, 92, 165);
+  while (travel > gap){
+    travel -= gap;
+    spawnObs(zm.a);
+    if (dist > 120 && Math.random() < 0.3) spawnObs(zm.a);
+  }
+  heartTravel += vz * dt;
+  if (heartTravel > 1500){ heartTravel = 0; spawnHearts(); }
+
+  // piggy appears down the road
+  if (state === "run" && !piggy && dist >= nextPiggy)
+    piggy = { x: rand(-FW * 0.65, FW * 0.65), z: FAR + 60 };
+
+  // march the world toward us
+  for (const o of obs) o.z -= vz * dt;
+  for (const h of hearts) h.z -= vz * dt;
+  if (piggy) piggy.z -= vz * dt;
+
+  // hearts: catch or pass
+  for (let i = hearts.length - 1; i >= 0; i--){
+    const h = hearts[i];
+    if (h.z < NEAR + 38 && h.z > NEAR - 10 && Math.abs(h.x - px) < 40 && state === "run"){
+      runHearts++; sHeart();
+      const p = proj(h.x, Math.max(h.z, NEAR + 1));
+      for (let k = 0; k < 5; k++)
+        parts.push({ x: p.x, y: p.y - 26, vx: rand(-60, 60), vy: rand(-130, -30),
+          g: 90, life: rand(0.5, 0.9), maxLife: 0.9, type: "heart",
+          size: rand(0.6, 1.1), color: pick(["#ff5e8a", "#ff8fb3", "#ffb3c8"]) });
+      hearts.splice(i, 1);
+    } else if (h.z < NEAR - 16) hearts.splice(i, 1);
+  }
+
+  // piggy: hug or a giggle from the sidelines
+  if (piggy && piggy.z < NEAR + 30){
+    if (Math.abs(piggy.x - px) < 75 && state === "run"){
+      runHugs++; hugT = t; sHug();
+      const p = proj(piggy.x, NEAR + 31);
+      for (let k = 0; k < 14; k++)
+        parts.push({ x: p.x + rand(-30, 30), y: p.y - rand(10, 80), vx: rand(-50, 50),
+          vy: rand(-120, -30), g: 40, life: rand(0.8, 1.6), maxLife: 1.6, type: "heart",
+          size: rand(0.8, 1.8), color: pick(["#ff5e8a", "#ff8fb3", "#ffd166"]) });
+      banner(pick(["piggy! 💗 ...and she hops ahead, giggling",
+                   "a quick nuzzle 💗 — catch me again!",
+                   "piggy kisses 💗 she's off again!"]));
+    } else if (state === "run"){
+      sOink();
+      banner(pick(["piggy giggles — over here! 💗", "so close! piggy waves 🐷"]));
+    }
+    piggy = null; nextPiggy = dist + 330;
+  }
+
+  // obstacles: collide or pass
+  for (let i = obs.length - 1; i >= 0; i--){
+    const o = obs[i];
+    if (state === "run" && o.z < NEAR + 34 && o.z > NEAR - 6 &&
+        Math.abs(o.x - px) < HITW[o.kind]){
+      state = "tumble"; tumbleT = t; sTrip();
+      for (let k = 0; k < 16; k++)
+        parts.push({ x: W / 2 + rand(-30, 30), y: BOTY - rand(0, 60),
+          vx: rand(-110, 110), vy: rand(-200, -30), g: 230,
+          life: rand(0.6, 1.3), maxLife: 1.3, type: k % 3 ? "petal" : "star",
+          size: rand(2, 4), rot: rand(0, 6.28),
+          color: pick(["#ffc2d4", "#fff3a0", "#ffffff", "#ff8fb3"]) });
+    }
+    if (o.z < NEAR - 20) obs.splice(i, 1);
+  }
+
+  // tumble ends in being found
+  if (state === "tumble" && t - tumbleT > 1.5){
+    state = "found"; foundT = t;
+    foundLine = pick(["found you anyway 💗", "there you are, silly bunny 💗",
+                      "my bunny! I was looking for YOU 💗"]);
+    newBest = dist > save.best && save.best > 0;
+    if (dist > save.best) save.best = dist;
+    save.hearts += runHearts; save.hugs += runHugs;
+    storeSave();
+  }
+
+  // ambient drift
+  if (Math.random() < (zm.a.amb === "snow" ? 0.3 : 0.12)){
+    const amb = zm.a.amb;
+    parts.push({ x: rand(0, W), y: amb === "firefly" ? rand(HOR, BOTY) : -10,
+      vx: rand(-14, 14), vy: amb === "firefly" ? rand(-12, -4) : rand(30, 70),
+      g: 0, life: rand(3, 6), maxLife: 6, type: amb, size: rand(2, 3.4),
+      rot: rand(0, 6.28), color: amb === "petal" ? pick(["#ffc2d4", "#ff8fb3"])
+           : amb === "leaf" ? pick(["#e07b39", "#f0a04b"])
+           : amb === "firefly" ? "#ffe9a8" : "#ffffff" });
+  }
+  updateParts(dt);
+}
+
+/* ----------------------------- particles ------------------------------ */
+function updateParts(dt){
+  for (let i = parts.length - 1; i >= 0; i--){
+    const p = parts[i];
+    p.vy += (p.g || 0) * dt;
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    if (p.type === "petal" || p.type === "leaf") p.x += Math.sin(t * 3 + p.rot) * 30 * dt;
+    p.life -= dt;
+    if (p.life <= 0) parts.splice(i, 1);
+  }
+}
+function drawParts(){
+  for (const p of parts){
+    const a = clamp(p.life / p.maxLife, 0, 1);
+    if (p.type === "heart"){ drawHeart(p.x, p.y, p.size, p.color, a); continue; }
+    ctx.globalAlpha = p.type === "firefly"
+      ? a * (0.45 + 0.55 * Math.abs(Math.sin(t * 2.6 + p.rot))) : a * 0.85;
+    ctx.fillStyle = p.color;
+    if (p.type === "star"){
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(t * 3 + p.rot);
+      ctx.fillRect(-p.size, -1, p.size * 2, 2);
+      ctx.fillRect(-1, -p.size, 2, p.size * 2);
+      ctx.restore();
+    } else if (p.type === "snow" || p.type === "firefly"){
+      ctx.beginPath(); ctx.arc(p.x, p.y, p.type === "snow" ? 2.2 : 2, 0, 7); ctx.fill();
+    } else {
+      ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(Math.sin(t * 1.6 + p.rot) + p.rot);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, p.type === "leaf" ? 4.4 : 3.2, p.type === "leaf" ? 2.5 : 1.9, 0, 0, 7);
+      ctx.fill(); ctx.restore();
+    }
+    ctx.globalAlpha = 1;
+  }
+}
+
+/* --------------------------- obstacle art ----------------------------- */
+function drawObstacle(o, p){
+  const s = p.s * 1.85;
+  ctx.save(); ctx.translate(p.x, p.y); ctx.scale(s, s);
+  ctx.fillStyle = "rgba(60,60,90,0.13)";
+  ctx.beginPath(); ctx.ellipse(0, 0, 22, 5, 0, 0, 7); ctx.fill();
+  const k = o.kind;
+  if (k === "tree" || k === "treeD"){
+    ctx.fillStyle = "#8a5c3a"; rr(-3.5, -34, 7, 36, 3); ctx.fill();
+    ctx.fillStyle = k === "treeD" ? "#4e8a5a" : "#69b25e";
+    ctx.beginPath(); ctx.arc(-11, -40, 13, 0, 7); ctx.arc(11, -42, 12, 0, 7);
+    ctx.arc(0, -52, 14, 0, 7); ctx.arc(0, -38, 12, 0, 7); ctx.fill();
+    ctx.fillStyle = k === "treeD" ? "#69b25e" : "#7fc671";
+    ctx.beginPath(); ctx.arc(-4, -47, 6, 0, 7); ctx.fill();
+  } else if (k === "sakura"){
+    ctx.fillStyle = "#8a5c3a"; rr(-3.5, -34, 7, 36, 3); ctx.fill();
+    ctx.fillStyle = "#ffb3cd";
+    ctx.beginPath(); ctx.arc(-12, -40, 14, 0, 7); ctx.fill();
+    ctx.fillStyle = "#ffc9db";
+    ctx.beginPath(); ctx.arc(12, -42, 13, 0, 7); ctx.fill();
+    ctx.fillStyle = "#ff9fc0";
+    ctx.beginPath(); ctx.arc(0, -54, 15, 0, 7); ctx.fill();
+    ctx.fillStyle = "#ffbcd3";
+    ctx.beginPath(); ctx.arc(1, -38, 13, 0, 7); ctx.fill();
+    ctx.fillStyle = "#ff7fae";
+    for (const bl of [[-14, -34], [9, -48], [2, -31], [-4, -52]]){
+      ctx.beginPath(); ctx.arc(bl[0], bl[1], 2.2, 0, 7); ctx.fill();
+    }
+  } else if (k === "autumn"){
+    ctx.fillStyle = "#8a5c3a"; rr(-3.5, -36, 7, 38, 3); ctx.fill();
+    ctx.fillStyle = "#e07b39"; ctx.beginPath(); ctx.arc(-12, -42, 14, 0, 7); ctx.fill();
+    ctx.fillStyle = "#f0a04b"; ctx.beginPath(); ctx.arc(12, -44, 13, 0, 7); ctx.fill();
+    ctx.fillStyle = "#d4583b"; ctx.beginPath(); ctx.arc(0, -56, 15, 0, 7); ctx.fill();
+    ctx.fillStyle = "#eb8f4e"; ctx.beginPath(); ctx.arc(1, -40, 13, 0, 7); ctx.fill();
+  } else if (k === "lavender"){
+    for (let j = -1; j <= 1; j++){
+      const tall = j === 0 ? 8 : 0;
+      ctx.strokeStyle = "#6b9a5c"; ctx.lineWidth = 2.6; ctx.lineCap = "round";
+      ctx.beginPath(); ctx.moveTo(j * 11, 0); ctx.lineTo(j * 11, -14 - tall); ctx.stroke();
+      ctx.fillStyle = j === 0 ? "#b48ae8" : "#c9a6ff";
+      ctx.beginPath(); ctx.ellipse(j * 11, -22 - tall, 4.2, 9.5, 0, 0, 7); ctx.fill();
+    }
+  } else if (k === "pine"){
+    ctx.fillStyle = "#8a6248"; rr(-3, -13, 6, 15, 2); ctx.fill();
+    ctx.fillStyle = "#3f8a66";
+    for (let i = 0; i < 3; i++){
+      const w = 30 - i * 8, yy = -12 - i * 19;
+      ctx.beginPath(); ctx.moveTo(-w / 2, yy); ctx.lineTo(w / 2, yy);
+      ctx.lineTo(0, yy - 26); ctx.closePath(); ctx.fill();
+    }
+    ctx.fillStyle = "#ffffff";
+    for (let i = 0; i < 3; i++){
+      const yy = -38 - i * 19;
+      ctx.beginPath(); ctx.ellipse(0, yy + 1, 7 - i * 1.6, 3, 0, 0, 7); ctx.fill();
+    }
+  } else if (k === "snowman"){
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath(); ctx.arc(0, -12, 12, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(0, -30, 8.5, 0, 7); ctx.fill();
+    ctx.fillStyle = "#4a3c46";
+    ctx.beginPath(); ctx.arc(-3, -32, 1.2, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(3, -32, 1.2, 0, 7); ctx.fill();
+    ctx.fillStyle = "#ff9344";
+    ctx.beginPath(); ctx.moveTo(0, -30.5); ctx.lineTo(7, -28.5); ctx.lineTo(0, -27.5);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "#ff8fb3"; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(-6, -24); ctx.quadraticCurveTo(0, -20, 6, -24); ctx.stroke();
+  } else if (k === "mushroom"){
+    ctx.fillStyle = "#fff4e6"; rr(-4, -16, 8, 16, 3); ctx.fill();
+    ctx.fillStyle = "#e8556f";
+    ctx.beginPath(); ctx.arc(0, -16, 13, Math.PI, 2 * Math.PI); ctx.fill();
+    ctx.fillStyle = "#ffffff";
+    ctx.beginPath(); ctx.arc(-5, -21, 2.2, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(4, -19, 1.7, 0, 7); ctx.fill();
+  } else {                                    // bush / bushA
+    ctx.fillStyle = k === "bushA" ? "#c98a3e" : "#5fae57";
+    ctx.beginPath(); ctx.arc(-10, -9, 11, 0, 7); ctx.arc(10, -9, 11, 0, 7);
+    ctx.arc(0, -16, 12, 0, 7); ctx.fill();
+    ctx.fillStyle = k === "bushA" ? "#e07b39" : "#ff8fb3";
+    for (const f of [[-10, -14], [8, -12], [0, -24]]){
+      ctx.beginPath(); ctx.arc(f[0], f[1], 2, 0, 7); ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+/* ---------------------------- run rendering --------------------------- */
+function drawWorld(){
+  const zm = zoneMix(dist);
+  const sky0 = mix(zm.a.sky[0], zm.b.sky[0], zm.k);
+  const sky1 = mix(zm.a.sky[1], zm.b.sky[1], zm.k);
+  const ground = mix(zm.a.ground, zm.b.ground, zm.k);
+  const hill = mix(zm.a.hill, zm.b.hill, zm.k);
+  // sky
+  const g = ctx.createLinearGradient(0, 0, 0, HOR + 40);
+  g.addColorStop(0, sky0); g.addColorStop(1, sky1);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, HOR + 40);
+  // stars at night (zone 4 and the blends around it)
+  const nightK = (zm.a.night ? 1 - zm.k : 0) + (zm.b.night ? zm.k : 0);
+  if (nightK > 0.03){
+    ctx.fillStyle = "#fff7d9";
+    for (let i = 0; i < 40; i++){
+      const sx = (i * 97.3) % W, sy2 = ((i * 53.7) % (HOR * 0.9));
+      ctx.globalAlpha = nightK * (0.3 + 0.6 * Math.abs(Math.sin(t * 1.3 + i)));
+      ctx.beginPath(); ctx.arc(sx, sy2, i % 3 ? 1 : 1.6, 0, 7); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+    // moon
+    ctx.globalAlpha = nightK;
+    ctx.fillStyle = "#fff3c2";
+    ctx.beginPath(); ctx.arc(W * 0.8, H * 0.1, 22, 0, 7); ctx.fill();
+    ctx.fillStyle = sky0;
+    ctx.beginPath(); ctx.arc(W * 0.8 + 9, H * 0.1 - 5, 18, 0, 7); ctx.fill();
+    ctx.globalAlpha = 1;
+  } else {
+    // soft sun
+    ctx.fillStyle = "rgba(255,250,210,0.9)";
+    ctx.beginPath(); ctx.arc(W * 0.8, H * 0.1, 24, 0, 7); ctx.fill();
+    ctx.fillStyle = "rgba(255,250,210,0.25)";
+    ctx.beginPath(); ctx.arc(W * 0.8, H * 0.1, 34, 0, 7); ctx.fill();
+  }
+  // clouds
+  ctx.fillStyle = "rgba(255,255,255,0.8)";
+  for (let i = 0; i < 4; i++){
+    const cx = ((i * 173 + t * (8 + i * 3)) % (W + 160)) - 80;
+    const cy = HOR * (0.25 + (i % 3) * 0.22);
+    ctx.globalAlpha = nightK > 0.5 ? 0.25 : 0.8;
+    ctx.beginPath(); ctx.arc(cx, cy, 16, 0, 7);
+    ctx.arc(cx + 16, cy + 3, 12, 0, 7); ctx.arc(cx - 16, cy + 4, 11, 0, 7); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  // far hills on the horizon
+  ctx.fillStyle = hill;
+  for (let i = -1; i < 5; i++){
+    const hx = ((i * 190 - px * 0.04) % (W + 380) + W + 380) % (W + 380) - 190;
+    ctx.beginPath(); ctx.arc(hx, HOR + 26, 90, Math.PI, 2 * Math.PI); ctx.fill();
+  }
+  // ground
+  const gg = ctx.createLinearGradient(0, HOR, 0, H);
+  gg.addColorStop(0, mix(ground, "#ffffff", 0.25)); gg.addColorStop(1, ground);
+  ctx.fillStyle = gg; ctx.fillRect(0, HOR + 18, W, H - HOR);
+  // speed lines rushing past
+  ctx.strokeStyle = "rgba(255,255,255,0.20)"; ctx.lineCap = "round";
+  for (let zz = NEAR + 130 - lineOff; zz < FAR; zz += 130){
+    const p1 = proj(-FW, zz), p2 = proj(FW, zz);
+    ctx.lineWidth = clamp(2.4 * p1.s * 3, 0.4, 2.4);
+    ctx.globalAlpha = clamp(p1.s * 2.2, 0.04, 0.3);
+    ctx.beginPath(); ctx.moveTo(p1.x, p1.y); ctx.lineTo(p2.x, p2.y); ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  // little flowers marking the meadow's edges
+  const edge = mix(zm.a.edge, zm.b.edge, zm.k);
+  for (let zz = NEAR + 65 - lineOff / 2, j = 0; zz < FAR; zz += 65, j++){
+    for (const ex of [-FW - 26, FW + 26]){
+      const p = proj(ex, zz);
+      ctx.globalAlpha = clamp(p.s * 2.4, 0.08, 0.85);
+      ctx.fillStyle = edge;
+      ctx.beginPath(); ctx.arc(p.x, p.y - 3 * p.s, clamp(7 * p.s * 2.2, 0.8, 5), 0, 7);
+      ctx.fill();
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+function renderRun(){
+  drawWorld();
+  // gather, sort far-to-near, draw
+  const all = [];
+  for (const o of obs) all.push({ z: o.z, kind: "obs", it: o });
+  for (const h of hearts) all.push({ z: h.z, kind: "heart", it: h });
+  if (piggy) all.push({ z: piggy.z, kind: "piggy", it: piggy });
+  all.sort((a, b) => b.z - a.z);
+  for (const e of all){
+    if (e.z < NEAR - 4 || e.z > FAR - 20) continue;
+    const p = proj(e.it.x, e.z);
+    const fade = clamp((FAR - 20 - e.z) / 320, 0, 1);   // gentle pop-in at the horizon
+    ctx.globalAlpha = fade;
+    if (e.kind === "obs") drawObstacle(e.it, p);
+    else if (e.kind === "heart")
+      drawHeart(p.x, p.y - (26 + Math.sin(t * 4 + e.it.ph) * 7) * p.s * 1.85,
+                clamp(p.s * 5.2, 0.25, 3.2), "#ff5e8a", fade * clamp(p.s * 3, 0.25, 1));
+    else drawPigletFront(p.x, p.y, p.s * 1.95, t);
+    ctx.globalAlpha = 1;
+  }
+  // our bunny
+  if (state === "tumble"){
+    const k = clamp((t - tumbleT) / 1.1, 0, 1);
+    drawBunnyBack(W / 2, BOTY - Math.sin(k * Math.PI) * 46, t,
+      { spin: k * 6.6, still: true });
+    if (k > 0.8)
+      txt("oof! 🌸", W / 2, BOTY - 110, 17, "#ffffff", "center", 700, (k - 0.8) * 5);
+  } else {
+    drawBunnyBack(W / 2, BOTY, t, { lean: lean });
+  }
+  drawParts();
+  // hug flash
+  if (t - hugT < 1.2){
+    const k = 1 - (t - hugT) / 1.2;
+    drawHeart(W / 2, H * 0.3, 4 + (1 - k) * 6, "#ff5e8a", k * 0.85);
+  }
+  // HUD — quiet little corners
+  drawHeart(24, 36, 1.5, "#ff5e8a");
+  txt("× " + runHearts, 40, 36, 16, "#ffffff", "left", 700, 0.95);
+  txt(Math.floor(dist) + "m", W - 22, 36, 16, "#ffffff", "right", 700, 0.95);
+  // banner
+  if (t - bannerT < 2.6){
+    const a = clamp(Math.min((t - bannerT) * 3, (2.6 - (t - bannerT)) * 1.5), 0, 1);
+    ctx.globalAlpha = a * 0.85; ctx.fillStyle = "#ffffff";
+    const bw = Math.min(W * 0.88, 360);
+    rr(W / 2 - bw / 2, H * 0.16, bw, 44, 22); ctx.fill();
+    ctx.globalAlpha = 1;
+    txt(bannerMsg, W / 2, H * 0.16 + 22, 15, "#b3486e", "center", 700, a);
+  }
+}
+/* ------------------------------ title ---------------------------------- */
+function renderTitle(){
+  dist = 0; lineOff = (lineOff + 90 * 0.016) % 130;
+  drawWorld();
+  // piggy waits far down the road
+  const pp = proj(0, 900);
+  drawPigletFront(pp.x, pp.y, pp.s * 1.95, t);
+  drawBunnyBack(W / 2, BOTY, t, { still: false });
+  if (Math.random() < 0.04)
+    parts.push({ x: W / 2 + rand(-60, 60), y: BOTY - 120, vx: 0, vy: -30, g: 0,
+      life: 1.6, maxLife: 1.6, type: "heart", size: rand(0.5, 0.9), color: "#ff8fb3" });
+  updateParts(0.016); drawParts();
+  const ty = H * 0.17;
+  txt("Bunny Dash", W / 2 + 2, ty + 2, Math.min(40, W * 0.1), "rgba(120,60,90,0.25)");
+  txt("Bunny Dash", W / 2, ty, Math.min(40, W * 0.1), "#ffffff");
+  txt("run to your piggy 💗", W / 2, ty + 44, 18, "#fff0f5");
+  txt("another tiny game for Gina", W / 2, ty + 70, 13, "#ffe4ee", "center", 400, 0.85);
+  ctx.globalAlpha = 0.92; ctx.fillStyle = "#ffffff";
+  const bw = Math.min(W * 0.6, 230);
+  rr(W / 2 - bw / 2, H * 0.62, bw, 50, 25); ctx.fill(); ctx.globalAlpha = 1;
+  txt("tap to run", W / 2, H * 0.62 + 25, 19, "#b3486e", "center", 700,
+      0.75 + 0.25 * Math.sin(t * 3));
+  txt("tilt your phone to steer 🐰", W / 2, H * 0.62 + 72, 13, "#ffffff", "center", 400, 0.8);
+  if (save.best > 0)
+    txt("longest run so far · " + Math.floor(save.best) + "m", W / 2, H * 0.93, 13,
+        "#ffffff", "center", 400, 0.7);
+}
+
+/* --------------------------- found by piggy ---------------------------- */
+function renderFound(){
+  drawWorld();
+  drawParts();
+  const k = clamp((t - foundT) / 0.5, 0, 1);
+  ctx.globalAlpha = 0.93 * k; ctx.fillStyle = "#fffdf8";
+  const pw = Math.min(W * 0.86, 350), ph2 = 250, py0 = H * 0.24;
+  rr(W / 2 - pw / 2, py0, pw, ph2, 26); ctx.fill(); ctx.globalAlpha = 1;
+  if (k > 0.6){
+    const a = (k - 0.6) / 0.4;
+    txt("you ran " + Math.floor(dist) + "m 🐾", W / 2, py0 + 52, 24, "#b3486e", "center", 700, a);
+    txt("and caught " + runHearts + " ♥" + (runHugs ? " · " + runHugs + " nuzzle" +
+        (runHugs > 1 ? "s" : "") + " 🐷" : ""), W / 2, py0 + 92, 15, "#c4708c", "center", 400, a);
+    if (newBest)
+      txt("✨ your longest run yet ✨", W / 2, py0 + 124, 15, "#d4a017", "center", 700,
+          a * (0.75 + 0.25 * Math.sin(t * 3)));
+    txt('"' + foundLine + '"', W / 2, py0 + (newBest ? 158 : 140), 16, "#b3486e", "center", 700, a);
+    txt("tap to run again", W / 2, py0 + ph2 - 34, 15, "#c4708c", "center", 700,
+        a * (0.7 + 0.3 * Math.sin(t * 3)));
+  }
+  // piggy trots in to nuzzle her bunny
+  const walk = clamp((t - foundT) / 1.4, 0, 1);
+  const pgx = lerp(W + 60, W / 2 + 46, 1 - (1 - walk) * (1 - walk));
+  drawBunny(W / 2 - 46, BOTY + 30, t, { face: 1, happy: walk >= 1 });
+  drawPiglet(pgx, BOTY + 30, t, { face: -1, happy: true, lean: walk < 1 ? Math.sin(t * 9) * 0.06 : 0 });
+  if (walk >= 1 && Math.random() < 0.08)
+    parts.push({ x: W / 2 + rand(-40, 40), y: BOTY - 60, vx: rand(-10, 10), vy: -36, g: 0,
+      life: 1.4, maxLife: 1.4, type: "heart", size: rand(0.6, 1.2),
+      color: pick(["#ff5e8a", "#ff8fb3"]) });
+  updateParts(0.016);
+}
+
+/* ------------------------------ input ---------------------------------- */
+function askTilt(){
+  if (tiltOn) return;
+  const attach = () => {
+    window.addEventListener("deviceorientation", e => {
+      if (e.gamma === null) return;
+      tiltOn = true;
+      const o = (screen.orientation && screen.orientation.angle) || window.orientation || 0;
+      tiltG = o === 90 ? -(e.beta || 0) : o === -90 || o === 270 ? (e.beta || 0) : e.gamma;
+    });
+  };
+  try {
+    if (typeof DeviceOrientationEvent !== "undefined" &&
+        typeof DeviceOrientationEvent.requestPermission === "function")
+      DeviceOrientationEvent.requestPermission()
+        .then(r => { if (r === "granted") attach(); }).catch(() => {});
+    else attach();
+  } catch(e){}
+}
+function tap(x, y){
+  sndInit();
+  if (state === "title"){ startRun(); return; }
+  if (state === "found" && t - foundT > 1){ startRun(); return; }
+}
+cvs.addEventListener("pointerdown", e => {
+  e.preventDefault();
+  tap(e.clientX, e.clientY);
+  if (state === "run") touchX = e.clientX;
+}, { passive: false });
+cvs.addEventListener("pointermove", e => {
+  if (touchX >= 0) touchX = e.clientX;
+}, { passive: true });
+const endTouch = () => { touchX = -1; };
+cvs.addEventListener("pointerup", endTouch);
+cvs.addEventListener("pointercancel", endTouch);
+window.addEventListener("keydown", e => {
+  if (e.key === "ArrowLeft") keyDir = -1;
+  else if (e.key === "ArrowRight") keyDir = 1;
+  else if (e.key === " " && state !== "run") tap(W / 2, H / 2);
+});
+window.addEventListener("keyup", e => {
+  if ((e.key === "ArrowLeft" && keyDir < 0) || (e.key === "ArrowRight" && keyDir > 0))
+    keyDir = 0;
+});
+
+/* ------------------------------ main loop ------------------------------ */
+function loop(ms){
+  const dt = Math.min(0.05, (ms - last) / 1000 || 0.016);
+  last = ms; t += dt;
+  ctx.clearRect(0, 0, W, H);
+  if (state === "title") renderTitle();
+  else if (state === "found"){ renderFound(); }
+  else { updateRun(dt); renderRun(); }
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
